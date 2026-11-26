@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Carte Gazpar, démo</title>
+<style>
+  body { margin: 0; padding: 24px 16px; background: #111827; font-family: Roboto, "Segoe UI", system-ui, sans-serif; color: #e5e7eb; }
+  body.light { background: #eef1f5; color: #1f2937; }
+  h1 { font-size: 1.2rem; margin: 0 0 4px; } p { margin: 0 0 18px; font-size: .9rem; opacity: .8; }
+  .grid { display: grid; grid-template-columns: minmax(300px, 520px); gap: 20px; }
+  .bar { display: flex; gap: 8px; margin-bottom: 18px; flex-wrap: wrap; }
+  button { padding: 6px 12px; border-radius: 8px; border: 1px solid #4b5563; background: transparent; color: inherit; cursor: pointer; font: inherit; }
+  button.on { background: #ff8f3d; border-color: #ff8f3d; color: #1a2434; }
+</style>
+</head>
+<body>
+<h1>Carte Gazpar</h1>
+<p>Démo avec des données fictives : la vraie carte, sans Home Assistant ni compteur.</p>
+<div class="bar">
+  <button data-s="m3" class="on">Compteur en m³ + coefficient</button>
+  <button data-s="kwh">Compteur en kWh</button>
+  <button data-s="nofactor">m³ sans coefficient</button>
+  <button data-s="pulses">Impulsions brutes</button>
+  <button data-s="theme">Clair / sombre</button>
+</div>
+<div class="grid" id="grid"></div>
+<script src="../gazpar-card.js"></script>
+<script>
+  // Données fictives : statistiques de Home Assistant (jour et heure) fabriquées pour la démo
+  const DAY = 86400000, H = 3600000, now = new Date();
+  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const FACTOR = 11.2;
+  // Chauffage au gaz : plus en hiver, pointes le matin et le soir, eau chaude aux heures des repas
+  const season = (t) => {
+    const d = new Date(t), doy = Math.floor((t - new Date(d.getFullYear(), 0, 1).getTime()) / DAY), day = Math.floor(t / DAY);
+    return Math.max(0.12, 0.55 + 0.5 * Math.cos((2 * Math.PI * (doy - 15)) / 365)) * (1 + 0.2 * Math.sin(day * 1.3)) * (d.getFullYear() < now.getFullYear() ? 1.08 : 1);
+  };
+  const PROFILE = [0.05, 0.03, 0.03, 0.03, 0.05, 0.12, 0.32, 0.36, 0.22, 0.12, 0.1, 0.1, 0.14, 0.12, 0.08, 0.08, 0.1, 0.18, 0.28, 0.3, 0.24, 0.18, 0.12, 0.08];
+  const m3At = (t) => PROFILE[new Date(t).getHours()] * season(t); // m³ dans l'heure
+  let scen = "m3", dark = true;
+  const unit = () => (scen === "kwh" ? "kWh" : scen === "pulses" ? undefined : "m³");
+  const toUnit = (m3) => (scen === "kwh" ? m3 * FACTOR : scen === "pulses" ? m3 * 100 : m3);
+  const BASE_INDEX = 8412.37;
+  const series = (from, to, period) => {
+    const rows = [];
+    let st = BASE_INDEX;
+    for (let t = new Date(now.getFullYear() - 1, 0, 1).getTime(); t < from; t += H) st += m3At(t);
+    const step = period === "day" ? DAY : H;
+    for (let t = from; t + step <= to; t += step) {
+      let c = 0;
+      if (period === "day") for (let h = 0; h < 24; h++) c += m3At(t + h * H);
+      else c = m3At(t);
+      st += c;
+      rows.push({ start: t, end: t + step, change: toUnit(c), state: toUnit(st) });
+    }
+    return { rows, st };
+  };
+  const lastHour = Math.floor((now.getTime() - 10 * 60000) / H) * H;
+  const build = () => {
+    const live = series(midnight - DAY, lastHour, "hour").st + m3At(now.getTime()) * ((now.getTime() - lastHour) / H);
+    const st = (s, a = {}, changedAgo = 0) => ({ state: String(s), attributes: a, last_updated: String(Math.random()), last_changed: new Date(Date.now() - changedAgo).toISOString() });
+    const states = {
+      "sensor.compteur_de_gaz": st(toUnit(live).toFixed(scen === "pulses" ? 0 : 3), {
+        unit_of_measurement: unit(), device_class: scen === "kwh" ? "energy" : scen === "pulses" ? undefined : "gas",
+        state_class: "total_increasing", friendly_name: "Compteur de gaz (ZiPulses)" }, 70000),
+      "input_number.conversion_gaz_kwh": st(FACTOR, { unit_of_measurement: "kWh/m³" }),
+      "input_number.prix_kwh_gaz": st(0.1052, { unit_of_measurement: "EUR/kWh" }),
+    };
+    return {
+      states,
+      themes: { darkMode: dark },
+      callWS: async (msg) => {
+        if (msg.type === "energy/get_prefs") return { energy_sources: [] };
+        const from = Date.parse(msg.start_time), to = Math.min(Date.parse(msg.end_time), msg.period === "hour" ? lastHour : midnight);
+        return { "sensor.compteur_de_gaz": series(from, to, msg.period).rows };
+      },
+    };
+  };
+  const config = () => ({
+    type: "custom:gazpar-card", title: "Gaz", entity: "sensor.compteur_de_gaz", days: 14, show_week: true,
+    ...(scen === "nofactor" ? {} : { conversion_entity: "input_number.conversion_gaz_kwh" }),
+    ...(scen === "kwh" ? {} : { price_entity: "input_number.prix_kwh_gaz" }),
+    ...(scen === "kwh" ? { price: 0.1052 } : {}),
+    subscription_price: 19.5, theme: dark ? "v2" : "auto",
+  });
+  const draw = () => {
+    try { Object.keys(localStorage).filter((k) => k.startsWith("gazpar-card:jours")).forEach((k) => localStorage.removeItem(k)); } catch (e) {}
+    const grid = document.getElementById("grid");
+    grid.innerHTML = "";
+    const card = document.createElement("gazpar-card");
+    card.setConfig(config());
+    card.hass = build();
+    grid.appendChild(card);
+  };
+  document.querySelectorAll("[data-s]").forEach((b) => b.addEventListener("click", () => {
+    if (b.dataset.s === "theme") { dark = !dark; document.body.classList.toggle("light", !dark); }
+    else { scen = b.dataset.s; document.querySelectorAll("[data-s]:not([data-s=theme])").forEach((x) => x.classList.toggle("on", x === b)); }
+    draw();
+  }));
+  draw();
+</script>
+</body>
+</html>
