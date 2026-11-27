@@ -97,7 +97,26 @@ subscription_price: 19.50                        # abonnement mensuel TTC (facul
 
 ## Exemple : LiXee ZiPulses
 
-Le ZiPulses compte les **impulsions** du Gazpar : une impulsion = **10 litres** = 0,01 m³. Le plus fiable est un capteur en **m³**, la carte faisant elle-même la conversion en kWh :
+Le [ZiPulses](https://github.com/fairecasoimeme/ZiPulses) compte les **impulsions** du Gazpar : une impulsion = **10 litres** = 0,01 m³. Le plus fiable est un compteur en **m³**, la carte faisant elle-même la conversion en kWh.
+
+### Solution conseillée : le ZiPulses envoie directement des m³
+
+Le ZiPulses calcule lui-même un index converti (impulsions × multiplicateur ÷ diviseur) dans l'unité de votre choix. Réglez-le une fois :
+
+| Réglage (cluster Metering) | Valeur pour un Gazpar |
+| --- | --- |
+| Unité (`unitOfMeasure`) | `1` (m³) |
+| Multiplicateur (`multiplier`) | `1` |
+| Diviseur (`divisor`) | `100` |
+
+- **Zigbee2MQTT** : onglet **Exposes** du ZiPulses, saisissez les trois valeurs, puis appuyez sur le bouton **Link** du module (il dort et n'accepte les réglages qu'à son réveil). Vérifiez après actualisation, puis, dans l'onglet **À propos**, lancez la reconfiguration (icône jaune) et appuyez encore sur **Link**.
+- **ZHA** : appareil › **Gérer l'appareil Zigbee** › cluster **Metering**, écrivez `unit_of_measure`, `multiplier` et `divisor`, en appuyant sur **Link** juste avant.
+
+Choisissez ensuite dans la carte l'entité de comptage du ZiPulses. **Vérifiez son unité** dans **Outils de développement › États** : selon l'intégration, Home Assistant peut garder l'étiquette « kWh » alors que la valeur est désormais en m³. Dans ce cas, utilisez le capteur template ci-dessous (avec l'index converti, sans diviser par 100), pour que la carte et le tableau Énergie sachent qu'il s'agit de m³.
+
+### Sinon : un capteur template en m³
+
+Si l'index reste en impulsions, convertissez-le en m³ :
 
 ```yaml
 template:
@@ -113,6 +132,12 @@ template:
 > ⚠️ **Évitez un compteur en kWh calculé avec un coefficient réglable** (`impulsions / 100 × coefficient`). Le coefficient de conversion change d'une facture à l'autre : à chaque modification, tout le cumul est recalculé. S'il baisse, le compteur `total_increasing` diminue, Home Assistant y voit une remise à zéro et le tableau Énergie affiche un pic. Avec un compteur en m³, le coefficient ne sert qu'à l'affichage.
 >
 > Attention aussi à l'unité : un nombre d'impulsions multiplié directement par un coefficient en kWh/m³ donne une énergie **100 fois trop grande** (il faut d'abord diviser par 100 pour avoir des m³).
+
+### Bon à savoir sur le ZiPulses
+
+- **Rythme des envois** : sur pile, le ZiPulses envoie son index **chaque minute pendant que le gaz passe** à partir du firmware v8 ; avant, seulement **toutes les 2 heures**, et le « direct » de la carte est alors très grossier. Alimenté sur secteur, il envoie l'index en moins d'une seconde.
+- **Index qui recule** : avant le firmware **v12.2**, l'index pouvait reculer de 1 à 3 impulsions pendant un passage de gaz (Zigbee2MQTT). Home Assistant y voit une remise à zéro du compteur, d'où des pics dans les statistiques, la carte et le tableau Énergie. Mettez le firmware à jour (flash par USB-TTL, pas de mise à jour à distance).
+- **Pas de débit** : le ZiPulses ne mesure pas le débit, l'option `flow_entity` ne lui sert pas. La pastille « Gaz en cours » se fonde sur les changements de l'index.
 
 ## Bon à savoir
 
