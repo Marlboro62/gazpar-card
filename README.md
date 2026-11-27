@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Marlboro62/gazpar-card/main/images/icon-256.png" alt="Carte Gazpar" width="160">
+</p>
+
 <p>
   ☕ <strong>Si cette carte vous est utile, vous pouvez soutenir le projet :</strong>
 </p>
