@@ -68,10 +68,12 @@ Si la carte n'apparaît pas encore dans la recherche, ajoutez-la comme dépôt p
 
 ## Configuration
 
+> **Nom de la carte : `custom:gazpar-live-card`** (depuis la version 0.4.0). L'ancien `custom:gazpar-card` fonctionne toujours, sauf si la carte GrDF de ssenart ([lovelace-gazpar-card](https://github.com/ssenart/lovelace-gazpar-card)) est aussi installée : elle utilise le même nom, et c'est alors elle qui s'affiche (« The minimum required version of Gazpar Integration… »). Dans ce cas, remplacez `custom:gazpar-card` par `custom:gazpar-live-card`.
+
 Le plus simple est l'**éditeur visuel**. En YAML :
 
 ```yaml
-type: custom:gazpar-card
+type: custom:gazpar-live-card
 entity: sensor.compteur_de_gaz_volume            # compteur cumulé en m³ (ou en kWh)
 conversion_entity: input_number.conversion_gaz   # coefficient kWh/m³ (ou conversion_factor: 11.2)
 price_entity: input_number.prix_kwh_gaz          # prix du kWh (ou price: 0.105)
@@ -129,7 +131,7 @@ Choisissez ensuite dans la carte l'entité de comptage du ZiPulses. **Vérifiez 
 Laissé par défaut, le ZiPulses compte des **impulsions** mais son entité affiche « kWh » : cette étiquette est fausse. La carte peut lire ces impulsions directement, sans capteur template :
 
 ```yaml
-type: custom:gazpar-card
+type: custom:gazpar-live-card
 entity: sensor.lixee_zipulses_consommation
 meter: pulses              # impulsions, malgré l'unité « kWh » affichée
 pulse_volume: 0.01         # une impulsion du Gazpar = 10 litres

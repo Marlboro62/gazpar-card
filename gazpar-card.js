@@ -5,7 +5,7 @@
  * compteur d'impulsions ESPHome…), d'après les statistiques de Home Assistant. Même présentation que
  * la carte ZLinky (Marlboro62/ZLinky-Card) et la carte Enedis Linky New.
  *
- * type: custom:gazpar-card
+ * type: custom:gazpar-live-card     (custom:gazpar-card reste accepté si aucune autre carte ne prend ce nom)
  * entity: sensor.<compteur de gaz cumulé, en m³ ou en kWh>
  * meter: auto                       (ou m3, kwh, pulses : ZiPulses réglé par défaut, impulsions affichées en « kWh »)
  * conversion_factor: 11.2            (kWh par m³, ou conversion_entity: input_number.… / sensor.gazpar)
@@ -15,7 +15,7 @@
  * © 2026 Marlboro62.
  */
 (() => {
-const CARD_VERSION = "0.3.0";
+const CARD_VERSION = "0.4.0";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -810,7 +810,7 @@ const gzCandidates = (hass) =>
 
 class GazparCard extends HTMLElement {
   static getConfigElement() {
-    return document.createElement("gazpar-card-editor");
+    return document.createElement("gazpar-live-card-editor");
   }
 
   /** Repère le compteur de gaz (m³ de préférence), le coefficient et le prix saisis à la main (input_number). */
@@ -1604,12 +1604,26 @@ const GazparCardEditor = makeEditor(GZ_SCHEMA, GZ_LABELS, GZ_DEFAULTS, GZ_COLORS
 
 if (typeof customElements !== "undefined") {
   const define = (name, cls) => { if (!customElements.get(name)) customElements.define(name, cls); };
-  define("gazpar-card", GazparCard);
-  define("gazpar-card-editor", GazparCardEditor);
+  // Nom propre à cette carte : « gazpar-card » est aussi celui de la carte GrDF de ssenart (lovelace-gazpar-card),
+  // et le premier script chargé prenait le nom de l'autre.
+  define("gazpar-live-card", GazparCard);
+  define("gazpar-live-card-editor", GazparCardEditor);
+  // Ancien nom gardé pour les tableaux de bord existants, mais seulement s'il est libre, et après un court délai :
+  // la carte de ssenart, si elle est installée, a ainsi le temps de prendre son nom sans erreur. Home Assistant
+  // redessine tout seul une carte dont l'élément est déclaré après coup.
+  setTimeout(() => {
+    if (customElements.get("gazpar-card")) {
+      if (customElements.get("gazpar-card") !== GazparCard && !(customElements.get("gazpar-card").prototype instanceof GazparCard)) {
+        console.warn("Carte Gazpar : le nom « gazpar-card » est pris par une autre carte (carte GrDF de ssenart ?). Utilisez « type: custom:gazpar-live-card » dans vos tableaux de bord.");
+      }
+      return;
+    }
+    customElements.define("gazpar-card", class extends GazparCard {});
+  }, 1500);
   window.customCards = window.customCards || [];
-  if (!window.customCards.some((c) => c.type === "gazpar-card")) {
+  if (!window.customCards.some((c) => c.type === "gazpar-live-card")) {
     window.customCards.push({
-      type: "gazpar-card",
+      type: "gazpar-live-card",
       name: "Carte Gazpar",
       description: "Consommation de gaz en direct (ZiPulses, compteur d'impulsions…) d'après les statistiques Home Assistant : jour, heure par heure, mois, année et coût.",
       preview: false,

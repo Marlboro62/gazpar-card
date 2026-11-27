@@ -79,7 +79,7 @@
     };
   };
   const config = () => ({
-    type: "custom:gazpar-card", title: "Gaz", entity: "sensor.compteur_de_gaz", days: 14, show_week: true,
+    type: "custom:gazpar-live-card", title: "Gaz", entity: "sensor.compteur_de_gaz", days: 14, show_week: true,
     ...(scen === "nofactor" ? {} : { conversion_entity: "input_number.conversion_gaz_kwh" }),
     ...(scen === "kwh" ? {} : { price_entity: "input_number.prix_kwh_gaz" }),
     ...(scen === "kwh" ? { price: 0.1052 } : {}),
@@ -91,7 +91,7 @@
     try { Object.keys(localStorage).filter((k) => k.startsWith("gazpar-card:jours")).forEach((k) => localStorage.removeItem(k)); } catch (e) {}
     const grid = document.getElementById("grid");
     grid.innerHTML = "";
-    const card = document.createElement("gazpar-card");
+    const card = document.createElement("gazpar-live-card");
     card.setConfig(config());
     card.hass = build();
     grid.appendChild(card);
