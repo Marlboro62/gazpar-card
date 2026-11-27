@@ -50,10 +50,15 @@ Même présentation que la [Carte ZLinky](https://github.com/Marlboro62/ZLinky-C
 
 ### Avec HACS
 
-1. Ouvrez **HACS**, menu ⋮ › **Dépôts personnalisés**.
-2. Adresse `https://github.com/Marlboro62/gazpar-card`, catégorie **Tableau de bord** (Lovelace).
-3. Cherchez **Carte Gazpar**, installez-la, puis rechargez la page (**Ctrl+F5**).
-4. Ajoutez la carte **Carte Gazpar** à un tableau de bord : l'éditeur propose le compteur de gaz qu'il trouve.
+La carte fait partie du catalogue par défaut de HACS.
+
+[![Ouvrir dans HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Marlboro62&repository=gazpar-card&category=plugin)
+
+1. Ouvrez **HACS** et cherchez **Carte Gazpar** (ou cliquez sur le bouton ci-dessus).
+2. Installez-la, puis rechargez la page (**Ctrl+F5**).
+3. Ajoutez la carte **Carte Gazpar** à un tableau de bord : l'éditeur propose le compteur de gaz qu'il trouve.
+
+Si la carte n'apparaît pas encore dans la recherche, ajoutez-la comme dépôt personnalisé : menu ⋮ › **Dépôts personnalisés**, adresse `https://github.com/Marlboro62/gazpar-card`, catégorie **Tableau de bord** (Lovelace).
 
 ### Manuellement
 
