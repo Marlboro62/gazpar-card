@@ -76,6 +76,7 @@ entity: sensor.compteur_de_gaz_volume            # compteur cumulé en m³ (ou e
 conversion_entity: input_number.conversion_gaz   # coefficient kWh/m³ (ou conversion_factor: 11.2)
 price_entity: input_number.prix_kwh_gaz          # prix du kWh (ou price: 0.105)
 subscription_price: 19.50                        # abonnement mensuel TTC (facultatif)
+consumption_tax: 0.0197                          # taxe sur la consommation en €/kWh, montant de votre facture (facultatif)
 ```
 
 | Option | Rôle | Par défaut |
@@ -90,7 +91,9 @@ subscription_price: 19.50                        # abonnement mensuel TTC (facul
 | `price` | Prix du kWh de gaz TTC, en €/kWh : passe avant les deux suivants | — |
 | `price_entity` | …ou entité du prix (`input_number` en €/kWh, ou en €/m³ si son unité le dit) | — |
 | `energy_prices` | Sinon, prendre le prix du gaz réglé dans le **tableau Énergie** | `true` |
-| `subscription_price` | Abonnement mensuel TTC, ajouté au coût au prorata des jours | — |
+| `subscription_price` | Abonnement mensuel TTC, ajouté au coût au prorata des jours. Les taxes fixes par mois (CTA, par exemple) peuvent s'y ajouter | — |
+| `consumption_tax` | **Taxe sur la consommation** en €/kWh (accise sur le gaz naturel, ex-TICGN, sur la facture), ajoutée au coût de chaque kWh et détaillée à part. Indiquez-la TTC si le prix l'est (la TVA s'applique aussi à cette taxe). Pour un compteur en m³, il faut le coefficient de conversion | — |
+| `consumption_tax_entity` | …ou entité qui la donne (`input_number` en €/kWh) | — |
 | `flow_entity` | Débit de gaz (facultatif) | — |
 | `live_minutes` | « Gaz en cours » si le compteur a bougé depuis moins de … minutes | `5` |
 | `days` | Jours affichés dans le graphique : 7, 14 ou 31 | `14` |

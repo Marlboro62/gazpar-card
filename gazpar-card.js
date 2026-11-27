@@ -10,11 +10,12 @@
  * meter: auto                       (ou m3, kwh, pulses : ZiPulses réglé par défaut, impulsions affichées en « kWh »)
  * conversion_factor: 11.2            (kWh par m³, ou conversion_entity: input_number.… / sensor.gazpar)
  * price: 0.105                       (€ par kWh, ou price_entity: input_number.…)
+ * consumption_tax: 0.0197            (taxe sur la consommation en € par kWh, ou consumption_tax_entity)
  *
  * © 2026 Marlboro62.
  */
 (() => {
-const CARD_VERSION = "0.2.0";
+const CARD_VERSION = "0.3.0";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -738,6 +739,8 @@ const GZ_DEFAULTS = {
   price_entity: "",
   energy_prices: true,
   subscription_price: null,
+  consumption_tax: null,
+  consumption_tax_entity: "",
   flow_entity: "",
   unit: "auto",
   days: 14,
@@ -972,7 +975,7 @@ class GazparCard extends HTMLElement {
 
   _signature() {
     const c = this._config;
-    const ids = [c.entity, c.conversion_entity, c.price_entity, c.flow_entity];
+    const ids = [c.entity, c.conversion_entity, c.price_entity, c.consumption_tax_entity, c.flow_entity];
     // la minute courante : « dernière impulsion il y a … » et « gaz en cours » se mettent à jour
     return `${c.theme}|${this._hass?.themes?.darkMode}|${this._loadedAt}|${Math.floor(Date.now() / 60000)}|`
       + ids.map((id) => this._state(id)?.last_updated || "-").join("|");
@@ -1012,6 +1015,17 @@ class GazparCard extends HTMLElement {
       if (e !== null) return { value: e, per: this._stats.kind === "energy" ? "kwh" : "m3", src: "du tableau Énergie" };
     }
     return null;
+  }
+
+  /** Taxe sur la consommation (accise sur le gaz naturel, ex-TICGN) en € par kWh : saisie dans la carte, sinon
+   *  lue dans une entité. Elle s'ajoute au prix du kWh ; les taxes fixes par mois vont dans l'abonnement. */
+  _tax() {
+    const c = this._config;
+    const fixed = positivePrice(c.consumption_tax);
+    if (fixed !== null) return { value: fixed, src: "saisie dans la carte" };
+    const st = this._state(c.consumption_tax_entity);
+    const v = st ? positivePrice(st.state) : null;
+    return v !== null ? { value: v, src: `lue dans ${c.consumption_tax_entity}` } : null;
   }
 
   /** Jours, du plus récent (aujourd'hui, en direct) au plus ancien : volume (m³) et énergie (kWh). */
@@ -1143,10 +1157,14 @@ class GazparCard extends HTMLElement {
     this._priceInfo = price;
     const sub = c.show_cost ? positivePrice(c.subscription_price) : null;
     this._subscription = sub;
+    const tax = c.show_cost ? this._tax() : null;
+    this._taxInfo = tax;
     all.forEach((d) => {
       const base = price ? (price.per === "kwh" ? d.kwh : d.m3) : null;
       d.energyCost = base !== null && price ? base * price.value : null;
-      d.cost = d.energyCost;
+      // taxe au kWh : il faut l'énergie, donc le coefficient pour un compteur en m³
+      d.tax = tax && d.kwh !== null ? d.kwh * tax.value : null;
+      d.cost = d.energyCost !== null ? d.energyCost + (d.tax || 0) : null;
       if (sub !== null) {
         const full = sub / new Date(d.date.getFullYear(), d.date.getMonth() + 1, 0).getDate();
         d.sub = d.today ? (full * (Date.now() - d.date.getTime())) / GZ.DAY : full;
@@ -1235,7 +1253,7 @@ class GazparCard extends HTMLElement {
       </div>
       <div class="hero-r">
         ${!this._config.show_cost ? "" : day.cost !== null && day.cost !== undefined
-          ? `<div class="cost">${euro(day.cost)}</div><div class="cost-l">${live ? "coût depuis minuit" : "coût de la journée"}${day.sub ? `, dont abonnement ${euro(day.sub)}` : ""}</div>`
+          ? `<div class="cost">${euro(day.cost)}</div><div class="cost-l">${live ? "coût depuis minuit" : "coût de la journée"}${[day.tax ? `taxe ${euro(day.tax)}` : "", day.sub ? `abonnement ${euro(day.sub)}` : ""].filter(Boolean).map((x, k) => (k ? ` et ${x}` : `, dont ${x}`)).join("")}</div>`
           : `<div class="cost none">—</div><div class="cost-l">${this._priceInfo ? "coefficient de conversion manquant" : "prix du gaz introuvable (carte, entité ou tableau Énergie)"}</div>`}
         ${live && this._hourNow && this._hourNow[u] ? `<div class="hero-p">Depuis la dernière heure : ${fmt(this._hourNow[u], 2)} ${unitL}</div>` : ""}
       </div>
@@ -1247,6 +1265,7 @@ class GazparCard extends HTMLElement {
     if (!day) return "";
     const rows = [`<tr><td><i class="zl-sw k-gas"></i>Gaz${day.m3 !== null && this._u === "kwh" ? ` · ${fmt(day.m3, 2)} m³` : day.kwh !== null && this._u === "m3" ? ` · ${fmt(day.kwh, 2)} kWh` : ""}</td>
       <td>${this._val(day)} ${this._u === "kwh" ? "kWh" : "m³"}</td><td>${day.energyCost !== null ? euro(day.energyCost) : "—"}</td></tr>`];
+    if (day.tax) rows.push(`<tr><td><i class="zl-sw zl-sub"></i>Taxe sur la consommation · ${fmt(this._taxInfo.value, 4)} €/kWh</td><td>—</td><td>${euro(day.tax)}</td></tr>`);
     if (day.sub) rows.push(`<tr><td><i class="zl-sw zl-sub"></i>Abonnement${day.today ? " (au prorata de l'heure)" : ""}</td><td>—</td><td>${euro(day.sub)}</td></tr>`);
     if (!this._config.show_cost && !day.sub) return "";
     return `<section class="zl-det">
@@ -1345,6 +1364,8 @@ class GazparCard extends HTMLElement {
     if (flow && GZ.num(flow.state) !== null) chips.push(chip("Débit", `${fmt(GZ.num(flow.state), 2)} ${esc(flow.attributes?.unit_of_measurement || "")}`, "", c.flow_entity));
     if (factor) chips.push(chip("Conversion", `${fmt(factor.value, 2)} kWh/m³`, "", factor.src === "carte" ? "Coefficient saisi dans la carte" : `Coefficient lu dans ${factor.src}`));
     if (price) chips.push(chip("Prix", `${fmt(price.value, 4)} €/${price.per === "kwh" ? "kWh" : "m³"}`, "", `Prix ${price.src}`));
+    const tax = this._taxInfo;
+    if (tax) chips.push(chip("Taxe conso.", `${fmt(tax.value, 4)} €/kWh`, "", `Taxe sur la consommation ${tax.src}`));
     if (factor && price && price.per === "kwh") chips.push(chip("Prix du m³", `${fmt(price.value * factor.value, 3)} €`, "", "Prix du kWh × coefficient de conversion"));
     if (!chips.length) return "";
     const open = this._isOpen("live");
@@ -1471,6 +1492,9 @@ class GazparCard extends HTMLElement {
     } else if (this._stats.kind === "volume" && !factor && this._config.show_cost && this._priceInfo?.per === "kwh") {
       bits.push("Prix au kWh mais compteur en m³ : indiquez le coefficient de conversion (kWh par m³, sur la facture) pour calculer le coût.");
     }
+    if (this._taxInfo && this._stats.kind === "volume" && !factor && !bits.some((b) => b.startsWith("Prix au kWh"))) {
+      bits.push("Taxe sur la consommation au kWh mais compteur en m³ : indiquez le coefficient de conversion (kWh par m³) pour l'ajouter au coût.");
+    }
     return bits.length ? `<div class="gz-warn">${bits.join("<br>")}</div>` : "";
   }
 
@@ -1478,7 +1502,9 @@ class GazparCard extends HTMLElement {
     const bits = ["Compteur de gaz en direct (statistiques Home Assistant)"];
     if (factor) bits.push(`énergie = volume × ${fmt(factor.value, 2)} kWh/m³`);
     if (this._config.show_cost) {
-      const abo = this._subscription ? `abonnement compris (${euro(this._subscription)}/mois)` : "hors abonnement";
+      const taxed = this._taxInfo && (factor || this._stats.kind === "energy");
+      const abo = (taxed ? `taxe sur la consommation comprise (${fmt(this._taxInfo.value, 4)} €/kWh), ` : "")
+        + (this._subscription ? `abonnement compris (${euro(this._subscription)}/mois)` : "hors abonnement");
       bits.push(price ? `coûts estimés ${abo}, au prix ${price.src}` : "prix du gaz introuvable, coûts masqués");
     }
     return `<footer>${bits.join(", ")}.</footer>`;
@@ -1520,6 +1546,8 @@ const GZ_SCHEMA = [
   { name: "price_entity", selector: { entity: { domain: ["input_number", "sensor", "number"] } } },
   { name: "energy_prices", selector: { boolean: {} } },
   { name: "subscription_price", selector: { number: { min: 0, max: 200, step: 0.01, mode: "box", unit_of_measurement: "€/mois" } } },
+  { name: "consumption_tax", selector: { number: { min: 0, max: 1, step: 0.00001, mode: "box", unit_of_measurement: "€/kWh" } } },
+  { name: "consumption_tax_entity", selector: { entity: { domain: ["input_number", "sensor", "number"] } } },
   { name: "flow_entity", selector: { entity: { domain: "sensor" } } },
   { name: "live_minutes", selector: { number: { min: 1, max: 60, step: 1, mode: "box", unit_of_measurement: "min" } } },
   SCHEMA.find((s) => s.name === "days"),
@@ -1551,7 +1579,9 @@ const GZ_LABELS = {
   price: "Prix du kWh de gaz, TTC (facultatif : passe avant l'entité et le tableau Énergie)",
   price_entity: "…ou entité du prix (input_number en €/kWh, ou €/m³ si son unité le dit)",
   energy_prices: "Sinon, prendre le prix du gaz réglé dans le tableau Énergie",
-  subscription_price: "Abonnement mensuel TTC (facultatif : ajouté au coût, au prorata)",
+  subscription_price: "Abonnement mensuel TTC (facultatif : ajouté au coût, au prorata ; les taxes fixes par mois, comme la CTA, peuvent s'y ajouter)",
+  consumption_tax: "Taxe sur la consommation en €/kWh (accise sur le gaz naturel, sur la facture ; facultatif, ajoutée au coût)",
+  consumption_tax_entity: "…ou entité de la taxe (input_number en €/kWh)",
   flow_entity: "Débit de gaz (facultatif)",
   live_minutes: "« Gaz en cours » si le compteur a bougé depuis moins de … minutes",
   show_details: "Afficher le détail du jour (gaz, abonnement, total)",

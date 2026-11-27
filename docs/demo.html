@@ -85,7 +85,7 @@
     ...(scen === "kwh" ? { price: 0.1052 } : {}),
     // ZiPulses laissé par défaut : des impulsions affichées en « kWh », la nature du compteur est forcée
     ...(scen === "zipulses" ? { meter: "pulses" } : {}),
-    subscription_price: 19.5, theme: dark ? "v2" : "auto",
+    subscription_price: 19.5, consumption_tax: 0.0197, theme: dark ? "v2" : "auto",
   });
   const draw = () => {
     try { Object.keys(localStorage).filter((k) => k.startsWith("gazpar-card:jours")).forEach((k) => localStorage.removeItem(k)); } catch (e) {}
