@@ -81,10 +81,12 @@ subscription_price: 19.50                        # abonnement mensuel TTC (facul
 | Option | Rôle | Par défaut |
 | --- | --- | --- |
 | `entity` | Compteur de gaz **cumulé** : m³ (ou L), kWh (ou Wh, MWh), ou impulsions sans unité. Il doit avoir la classe d'état `total_increasing` | — |
-| `conversion_factor` | Coefficient de conversion en **kWh par m³** (sur la facture, environ 11) | — |
+| `meter` | Nature du compteur : `auto` (d'après son unité), `m3`, `kwh` ou `pulses` (impulsions). À forcer sur `pulses` pour un **ZiPulses réglé par défaut**, qui compte des impulsions tout en affichant « kWh » | `auto` |
+| `conversion_factor` | Coefficient de conversion en **kWh par m³** (sur la facture, environ 11). Une valeur hors de 5 à 15 est ignorée et signalée (par exemple un coefficient en kWh par impulsion, environ 0,11) | — |
 | `conversion_entity` | …ou entité qui le donne : `input_number`, ou `sensor.gazpar` de l'intégration [home-assistant-gazpar](https://github.com/ssenart/home-assistant-gazpar) pour reprendre automatiquement le coefficient du dernier relevé GRDF | — |
 | `unit` | Unité affichée : `auto` (kWh si le coefficient est connu, sinon m³), `kwh` ou `m3` | `auto` |
-| `pulse_volume` | Volume d'une impulsion, pour un compteur sans unité (Gazpar : 10 litres) | `0.01` |
+| `pulse_volume` | Volume d'une impulsion, pour un compteur en impulsions (Gazpar : 10 litres) | `0.01` |
+| `index_offset` | Index de départ en m³, ajouté à l'**index affiché** pour qu'il corresponde à celui du Gazpar (le ZiPulses compte depuis 0 à son appairage). Sans effet sur les consommations | — |
 | `price` | Prix du kWh de gaz TTC, en €/kWh : passe avant les deux suivants | — |
 | `price_entity` | …ou entité du prix (`input_number` en €/kWh, ou en €/m³ si son unité le dit) | — |
 | `energy_prices` | Sinon, prendre le prix du gaz réglé dans le **tableau Énergie** | `true` |
@@ -119,7 +121,24 @@ Le ZiPulses calcule lui-même un index converti (impulsions × multiplicateur ÷
 
 Choisissez ensuite dans la carte l'entité de comptage du ZiPulses. **Vérifiez son unité** dans **Outils de développement › États** : selon l'intégration, Home Assistant peut garder l'étiquette « kWh » alors que la valeur est désormais en m³. Dans ce cas, utilisez le capteur template ci-dessous (avec l'index converti, sans diviser par 100), pour que la carte et le tableau Énergie sachent qu'il s'agit de m³.
 
+### Sans rien changer : le ZiPulses réglé par défaut
+
+Laissé par défaut, le ZiPulses compte des **impulsions** mais son entité affiche « kWh » : cette étiquette est fausse. La carte peut lire ces impulsions directement, sans capteur template :
+
+```yaml
+type: custom:gazpar-card
+entity: sensor.lixee_zipulses_consommation
+meter: pulses              # impulsions, malgré l'unité « kWh » affichée
+pulse_volume: 0.01         # une impulsion du Gazpar = 10 litres
+index_offset: 8412.37      # index du Gazpar le jour de l'appairage (facultatif)
+conversion_factor: 11.2    # kWh par m³, sur la facture
+```
+
+Sans `meter: pulses`, la carte prendrait chaque impulsion pour 1 kWh : elle affiche alors un avertissement. Pour le **tableau Énergie**, en revanche, il faut un capteur en m³ (ci-dessous), car il se fie à l'unité de l'entité.
+
 ### Sinon : un capteur template en m³
+
+Garder le ZiPulses par défaut et passer par un capteur template protège aussi l'historique : si vous remplacez un jour le module, seul le template change.
 
 Si l'index reste en impulsions, convertissez-le en m³ :
 

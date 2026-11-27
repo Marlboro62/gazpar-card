@@ -7,13 +7,14 @@
  *
  * type: custom:gazpar-card
  * entity: sensor.<compteur de gaz cumulé, en m³ ou en kWh>
+ * meter: auto                       (ou m3, kwh, pulses : ZiPulses réglé par défaut, impulsions affichées en « kWh »)
  * conversion_factor: 11.2            (kWh par m³, ou conversion_entity: input_number.… / sensor.gazpar)
  * price: 0.105                       (€ par kWh, ou price_entity: input_number.…)
  *
  * © 2026 Marlboro62.
  */
 (() => {
-const CARD_VERSION = "0.1.0";
+const CARD_VERSION = "0.2.0";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -668,14 +669,26 @@ const GZ = {
     if (/^(Wh|kWh|MWh)$/.test(u)) return "energy";
     return "raw";
   },
+  /** Nature retenue pour le compteur : celle imposée par l'option « meter » (m3, kwh, pulses), sinon celle de
+   *  son unité. Quand elle contredit l'unité (ZiPulses réglé par défaut : des impulsions étiquetées « kWh »),
+   *  les statistiques sont lues telles quelles, sans conversion d'unité par Home Assistant. */
+  meterOf(st, meter) {
+    const natural = GZ.kind(st);
+    const forced = { m3: "volume", kwh: "energy", pulses: "raw" }[meter] || null;
+    const kind = forced || natural;
+    const asIs = forced !== null && forced !== natural;
+    const units = asIs ? null : kind === "volume" ? { volume: "m³" } : kind === "energy" ? { energy: "kWh" } : null;
+    return { kind, natural, units, asIs };
+  },
   /** Valeur du compteur dans l'unité des statistiques lues : m³ (volume, impulsions × volume par impulsion) ou kWh. */
-  native(st, pulse) {
+  native(st, pulse, m = GZ.meterOf(st)) {
     const v = GZ.num(st?.state);
     if (v === null) return null;
+    if (m.kind === "raw") return v * pulse;
+    if (m.asIs) return v;
     const u = String(st.attributes?.unit_of_measurement || "").trim();
     if (u === "L" || u === "l" || u === "Wh") return v / 1000;
     if (u === "MWh") return v * 1000;
-    if (GZ.kind(st) === "raw") return v * pulse;
     return v;
   },
   /** Coefficient de conversion (kWh par m³) d'une entité : son état, ou le dernier relevé de l'intégration
@@ -716,7 +729,9 @@ const GZ = {
 const GZ_DEFAULTS = {
   title: "Gaz",
   entity: "",
+  meter: "auto",
   pulse_volume: 0.01,
+  index_offset: null,
   conversion_factor: null,
   conversion_entity: "",
   price: null,
@@ -815,7 +830,7 @@ class GazparCard extends HTMLElement {
     this._config = { ...c, days: Number(c.days || GZ_DEFAULTS.days) };
     this._sig = null;
     // un réglage d'affichage ne relit pas les statistiques : seulement un changement du compteur ou de l'unité
-    const dataKey = JSON.stringify([c.entity, c.pulse_volume, !!(c.show_cost && c.energy_prices !== false)]);
+    const dataKey = JSON.stringify([c.entity, c.meter, c.pulse_volume, !!(c.show_cost && c.energy_prices !== false)]);
     if (dataKey !== this._lastDataKey) {
       this._lastDataKey = dataKey;
       this._selected = 0;
@@ -857,7 +872,7 @@ class GazparCard extends HTMLElement {
     this._hass = hass;
     const st = this._state(this._config?.entity);
     // unité du compteur changée (m³ ↔ kWh) : les statistiques lues ne correspondent plus, relecture
-    if (st && this._stats && this._stats.rawKind !== GZ.kind(st)) { this._stats = null; this._loadedAt = 0; }
+    if (st && this._stats && this._stats.rawKind !== this._meterKey()) { this._stats = null; this._loadedAt = 0; }
     if (!this._loading && Date.now() - (this._loadedAt || 0) > GZ_RELOAD && st) this._load();
     this._render(false);
   }
@@ -884,6 +899,16 @@ class GazparCard extends HTMLElement {
     return id ? this._hass?.states?.[id] : undefined;
   }
 
+  /** Nature du compteur (volume, énergie ou impulsions) et unités à demander aux statistiques. */
+  _meter() {
+    return GZ.meterOf(this._state(this._config.entity), this._config.meter);
+  }
+
+  _meterKey() {
+    const m = this._meter();
+    return `${m.kind}${m.asIs ? "-brut" : ""}`;
+  }
+
   /** Volume d'une impulsion, pour un compteur sans unité (Gazpar : 10 litres, soit 0,01 m³). */
   _pulse() {
     const p = GZ.num(this._config.pulse_volume);
@@ -899,8 +924,9 @@ class GazparCard extends HTMLElement {
     try {
       const now = new Date();
       const id = this._config.entity;
-      const kind = GZ.kind(st);
-      const units = kind === "volume" ? { volume: "m³" } : kind === "energy" ? { energy: "kWh" } : null;
+      const m = this._meter();
+      const kind = m.kind;
+      const units = m.units;
       const k = kind === "raw" ? this._pulse() : 1;
       const yearStart = new Date(now.getFullYear() - 1, 0, 1);
       const yesterday = new Date(GZ.dayOf(now).getTime() - GZ.DAY);
@@ -918,7 +944,7 @@ class GazparCard extends HTMLElement {
         }));
       const ttl = GZ_RELOAD - 30000;
       // la clé suit aussi l'unité du compteur : un capteur passé de m³ à kWh ne reprend pas l'ancienne lecture
-      const sk = `${id}|${kind}`;
+      const sk = `${id}|${this._meterKey()}`;
       const daily = await zlShared(`gaz-jours|${sk}`, ttl, () => gzDaily(call, id, units, yearStart));
       const hourly = await zlShared(`gaz-heures|${sk}`, ttl, () => call(yesterday, "hour", ["change", "state"], [id], units));
       let prefs = null;
@@ -929,7 +955,7 @@ class GazparCard extends HTMLElement {
       const scale = (r) => ({ start: GZ.start(r).getTime(), change: Number.isFinite(r.change) ? r.change * k : null, state: Number.isFinite(r.state) ? r.state * k : null });
       this._stats = {
         kind: kind === "energy" ? "energy" : "volume",
-        rawKind: kind,
+        rawKind: this._meterKey(),
         daily: (daily || []).map((r) => ({ start: r.start, change: Number.isFinite(r.change) ? r.change * k : null })),
         hourly: ((hourly || {})[id] || []).map(scale),
         prefs,
@@ -955,10 +981,21 @@ class GazparCard extends HTMLElement {
   /** Coefficient de conversion en kWh par m³ : saisi dans la carte, sinon lu dans une entité. */
   _factor() {
     const c = this._config;
+    this._badFactor = null;
+    // un coefficient en kWh/m³ vaut environ 11 : hors de 5 à 15, il est écarté (et signalé) plutôt que d'afficher
+    // des kWh et des coûts faux, par exemple un coefficient en kWh par impulsion (environ 0,11)
     const fixed = positivePrice(c.conversion_factor);
-    if (fixed !== null) return { value: fixed, src: "carte" };
-    const f = GZ.factorOf(this._state(c.conversion_entity));
-    return f !== null ? { value: f, src: c.conversion_entity } : null;
+    if (fixed !== null) {
+      if (fixed > 5 && fixed < 15) return { value: fixed, src: "carte" };
+      this._badFactor = { value: fixed, src: "saisi dans la carte" };
+      return null;
+    }
+    const st = this._state(c.conversion_entity);
+    const f = GZ.factorOf(st);
+    if (f !== null) return { value: f, src: c.conversion_entity };
+    const v = st ? GZ.num(st.state) : null;
+    if (v !== null && v > 0) this._badFactor = { value: v, src: `lu dans ${c.conversion_entity}` };
+    return null;
   }
 
   /** Prix : €/kWh saisi ou lu dans une entité (€/m³ si l'unité de l'entité le dit), sinon prix du tableau Énergie
@@ -1003,7 +1040,7 @@ class GazparCard extends HTMLElement {
       else if (row.start + GZ.HOUR <= dayAgo && row.change !== null) sameTime += row.change;
       last = row;
     }
-    const cur = GZ.native(this._state(this._config.entity), this._pulse());
+    const cur = GZ.native(this._state(this._config.entity), this._pulse(), this._meter());
     const delta = cur !== null && last && last.state !== null ? Math.max(0, cur - last.state) : 0;
     if (delta && last.start + GZ.HOUR >= today.getTime()) sum += delta;
     // heure en cours : ce qui a tourné depuis la dernière heure enregistrée
@@ -1231,9 +1268,9 @@ class GazparCard extends HTMLElement {
     this._hours = this._hours || {};
     if (this._hours[key] || d.today || d.date.getTime() === GZ.dayOf(new Date()).getTime() - GZ.DAY) return;
     this._hours[key] = "loading";
-    const st = this._state(this._config.entity);
-    const kind = GZ.kind(st);
-    const units = kind === "volume" ? { volume: "m³" } : kind === "energy" ? { energy: "kWh" } : null;
+    const m = this._meter();
+    const kind = m.kind;
+    const units = m.units;
     const k = kind === "raw" ? this._pulse() : 1;
     try {
       const res = await this._hass.callWS({
@@ -1296,6 +1333,12 @@ class GazparCard extends HTMLElement {
     const chips = [];
     const cur = this._current;
     const idx = cur !== null ? this._conv(cur, factor) : null;
+    // index de départ (m³) : le ZiPulses compte depuis 0 à son appairage, l'index affiché rejoint celui du Gazpar
+    const off = GZ.num(c.index_offset);
+    if (idx && off) {
+      if (idx.m3 !== null) idx.m3 += off;
+      if (idx.kwh !== null && factor) idx.kwh += off * factor.value;
+    }
     if (idx?.m3 !== null && idx?.m3 !== undefined) chips.push(chip("Index", `${fmt(idx.m3, 2)} m³`, "k-gas", c.entity));
     if (idx?.kwh !== null && idx?.kwh !== undefined) chips.push(chip(this._stats.kind === "energy" ? "Index" : "Index (énergie)", `${fmt(idx.kwh, 0)} kWh`, this._stats.kind === "energy" ? "k-gas" : "", c.entity));
     const flow = this._state(c.flow_entity);
@@ -1415,7 +1458,17 @@ class GazparCard extends HTMLElement {
     if (sc !== "total_increasing" && sc !== "total") {
       bits.push(`Le compteur n'a pas de classe d'état <code>total_increasing</code> : Home Assistant ne garde pas ses statistiques, l'historique restera vide.`);
     }
-    if (this._stats.kind === "volume" && !factor && this._config.show_cost && this._priceInfo?.per === "kwh") {
+    const m = this._meter();
+    const name = `${this._config.entity} ${st?.attributes?.friendly_name || ""}`;
+    if ((!this._config.meter || this._config.meter === "auto") && m.natural === "energy" && /zipulse|lixee|impuls|pulse/i.test(name)) {
+      bits.push(`Ce compteur semble être un ZiPulses réglé par défaut : il compte des <b>impulsions</b> (10 litres chacune) même si son unité affiche « ${esc(st?.attributes?.unit_of_measurement || "")} ». Réglez <b>Nature du compteur</b> sur « Impulsions » (<code>meter: pulses</code>), ou sur « kWh » (<code>meter: kwh</code>) s'il envoie vraiment des kWh.`);
+    }
+    const bad = this._badFactor;
+    if (bad) {
+      const p = this._pulse();
+      const perPulse = bad.value < 1 ? ` S'il est en kWh <b>par impulsion</b>, la valeur à indiquer est ${fmt(bad.value / p, 2)} kWh/m³ (× ${fmt(1 / p, 0)}).` : "";
+      bits.push(`Coefficient de conversion ignoré : ${fmt(bad.value, 4)} (${esc(bad.src)}) n'est pas en kWh par m³, qui vaut environ 11 (sur la facture).${perPulse} Les kWh et les coûts au kWh ne sont pas calculés en attendant.`);
+    } else if (this._stats.kind === "volume" && !factor && this._config.show_cost && this._priceInfo?.per === "kwh") {
       bits.push("Prix au kWh mais compteur en m³ : indiquez le coefficient de conversion (kWh par m³, sur la facture) pour calculer le coût.");
     }
     return bits.length ? `<div class="gz-warn">${bits.join("<br>")}</div>` : "";
@@ -1447,6 +1500,12 @@ const gzStyle = (c) => {
 const GZ_SCHEMA = [
   { name: "entity", required: true, selector: { entity: { domain: "sensor" } } },
   { name: "title", selector: { text: {} } },
+  { name: "meter", selector: { select: { mode: "dropdown", options: [
+    { value: "auto", label: "Automatique (d'après l'unité du capteur)" },
+    { value: "m3", label: "Volume en m³" },
+    { value: "kwh", label: "Énergie en kWh" },
+    { value: "pulses", label: "Impulsions (ZiPulses réglé par défaut, même s'il affiche « kWh »)" },
+  ] } } },
   { name: "conversion_factor", selector: { number: { min: 0, max: 15, step: 0.001, mode: "box", unit_of_measurement: "kWh/m³" } } },
   { name: "conversion_entity", selector: { entity: { domain: ["input_number", "sensor", "number"] } } },
   { name: "unit", selector: { select: { mode: "dropdown", options: [
@@ -1455,6 +1514,7 @@ const GZ_SCHEMA = [
     { value: "m3", label: "m³" },
   ] } } },
   { name: "pulse_volume", selector: { number: { min: 0.0001, max: 1, step: 0.0001, mode: "box", unit_of_measurement: "m³" } } },
+  { name: "index_offset", selector: { number: { min: 0, max: 999999, step: 0.01, mode: "box", unit_of_measurement: "m³" } } },
   { name: "show_cost", selector: { boolean: {} } },
   { name: "price", selector: { number: { min: 0, max: 2, step: 0.0001, mode: "box", unit_of_measurement: "€/kWh" } } },
   { name: "price_entity", selector: { entity: { domain: ["input_number", "sensor", "number"] } } },
@@ -1481,10 +1541,12 @@ const GZ_LABELS = {
   ...LABELS,
   entity: "Compteur de gaz cumulé (m³ de préférence, ou kWh ; classe d'état total_increasing)",
   title: "Titre",
+  meter: "Nature du compteur (à forcer pour un ZiPulses réglé par défaut, qui compte des impulsions affichées en « kWh »)",
   conversion_factor: "Coefficient de conversion en kWh par m³ (sur la facture, environ 11)",
   conversion_entity: "…ou entité du coefficient (input_number, ou sensor.gazpar de l'intégration GRDF pour le reprendre tout seul)",
   unit: "Unité affichée",
-  pulse_volume: "Volume d'une impulsion, pour un compteur sans unité (Gazpar : 0,01 m³)",
+  pulse_volume: "Volume d'une impulsion, pour un compteur en impulsions (Gazpar : 0,01 m³)",
+  index_offset: "Index de départ, en m³, ajouté à l'index affiché (le ZiPulses compte depuis 0 à son appairage)",
   show_cost: "Afficher les coûts estimés",
   price: "Prix du kWh de gaz, TTC (facultatif : passe avant l'entité et le tableau Énergie)",
   price_entity: "…ou entité du prix (input_number en €/kWh, ou €/m³ si son unité le dit)",
